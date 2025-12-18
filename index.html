@@ -2,25 +2,26 @@
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
-<title>参数录入</title>
 <meta name="viewport" content="width=device-width,initial-scale=1">
+<title>参数录入（可扩展版）</title>
 <style>
-body{font-family:Arial;margin:20px;background:#f7f7f7}
+body{font-family:Arial;margin:0;background:#f7f7f7;padding:10px}
 h2{margin-top:0}
-.section{background:#fff;padding:15px;margin-bottom:15px;border:1px solid #ddd;border-radius:4px}
-.row{margin:8px 0;display:flex;align-items:center}
-.row label{width:100px;font-size:14px}
+.section{background:#fff;padding:12px;margin-bottom:10px;border:1px solid #ddd;border-radius:4px}
+.row{margin:6px 0;display:flex;align-items:center}
+.row label{width:110px;font-size:14px}
 .row input,select{height:28px;font-size:14px;padding:0 6px}
-button{padding:8px 18px;font-size:15px}
+button{padding:8px 16px;font-size:15px}
+.err{color:#e33;font-size:13px;margin-left:8px}
 </style>
 </head>
 <body>
 
-<h2>动点参数录入</h2>
+<h2>动点参数录入（主动/被动通用）</h2>
 
-<!-- ===== A点 ===== -->
-<div class="section">
-  <b>A点（常量）</b>
+<!-- ========== A 点 ========== -->
+<div class="section" id="asec">
+  <b>A 点</b>
   <div class="row">
     <label>初始位置</label>
     <input type="number" id="A_start" value="-1" step="1">
@@ -31,14 +32,14 @@ button{padding:8px 18px;font-size:15px}
     <select id="A_dir">
       <option value="-1">向左</option>
       <option value="1">向右</option>
-      <option value="0">固定不动</option>
+      <option value="0">固定</option>
     </select>
   </div>
 </div>
 
-<!-- ===== B点 ===== -->
-<div class="section">
-  <b>B点（常量）</b>
+<!-- ========== B 点 ========== -->
+<div class="section" id="bsec">
+  <b>B 点</b>
   <div class="row">
     <label>初始位置</label>
     <input type="number" id="B_start" value="3" step="1">
@@ -49,79 +50,222 @@ button{padding:8px 18px;font-size:15px}
     <select id="B_dir">
       <option value="-1">向左</option>
       <option value="1">向右</option>
-      <option value="0">固定不动</option>
+      <option value="0">固定</option>
     </select>
   </div>
 </div>
 
-<!-- ===== 第三点 ===== -->
-<div class="section">
-  <b>第三点（主动/被动）</b>
-  <div class="row">
-    <label>名称</label>
-    <input type="text" id="C_name" value="P" maxlength="4">
-  </div>
-  <div class="row">
-    <label>初始来源</label>
-    <select id="C_src">
-      <option value="abs">绝对位置</option>
-      <option value="mid">AB中点</option>
-    </select>
-  </div>
-  <div class="row" id="C_absRow">
-    <label>初始位置</label>
-    <input type="number" id="C_start" value="0" step="1">
-  </div>
-  <div class="row">
-    <label>速度</label>
-    <input type="number" id="C_speed" value="1" min="0" step="0.1">
-    <select id="C_dir">
-      <option value="-1">向左</option>
-      <option value="1">向右</option>
-      <option value="0">固定不动</option>
-    </select>
-  </div>
-</div>
+<!-- ========== 第三点（可重复添加） ========== -->
+<div id="dynamicSecs"></div>
 
 <div class="row">
+  <button id="addBtn">+ 添加新点</button>
   <button id="goBtn">生成动画</button>
 </div>
 
 <script>
-// 切换“绝对位置/中点”时显隐输入框
-document.getElementById('C_src').onchange = e => {
-  document.getElementById('C_absRow').style.display =
-    e.target.value === 'abs' ? 'flex' : 'none';
+/* ========== 数据池 ========== */
+let pointList = ['A','B'];          // 已创建节点名（用于下拉引用）
+let counter   = 0;                  // 生成 ID 用
+
+/* ========== 原子类型配置 ========== */
+const LOC_TYPE = {
+  abs:        {text:'绝对坐标',        need:['start']},
+  mid:        {text:'两点中点',        need:['refAB']},
+  segRatio:   {text:'定比分点',        need:['refAB','ratio']},
+  offsetAbs:  {text:'相对某点偏移',    need:['refP','offset']},
+  offsetRatio:{text:'相对某点比例',    need:['refP','ratio']}
+};
+const VEL_TYPE = {
+  abs:     {text:'绝对速度',   need:['speed','dir']},
+  same:    {text:'与某点同速', need:['refP']},
+  opposite:{text:'与某点反向', need:['refP']},
+  ratio:   {text:'与某点成比例',need:['refP','ratio']}
 };
 
-document.getElementById('goBtn').onclick = () => {
-  const data = {
-    A: {
-      start: Number(document.getElementById('A_start').value),
-      speed: Number(document.getElementById('A_speed').value),
-      dir: Number(document.getElementById('A_dir').value)
-    },
-    B: {
-      start: Number(document.getElementById('B_start').value),
-      speed: Number(document.getElementById('B_speed').value),
-      dir: Number(document.getElementById('B_dir').value)
-    },
-    C: {
-      name: document.getElementById('C_name').value.trim() || 'P',
-      src: document.getElementById('C_src').value,
-      start: Number(document.getElementById('C_start').value),
-      speed: Number(document.getElementById('C_speed').value),
-      dir: Number(document.getElementById('C_dir').value)
-    }
+/* ========== 通用 DOM 工具 ========== */
+function $el(tag,attr,children){
+  const e=document.createElement(tag);
+  if(attr) Object.keys(attr).forEach(k=>e[k]=attr[k]);
+  if(children) children.forEach(c=>e.appendChild(c));
+  return e;
+}
+
+/* ========== 创建「第三点」面板 ========== */
+function addSection(){
+  const id = 'P'+counter++;
+  const sec = $el('div',{className:'section',id:id});
+  sec.innerHTML=`
+  <b>点 ${id}</b>
+  <div class="row">
+    <label>名称</label>
+    <input type="text" class="nameIn" value="${id}" maxlength="4">
+  </div>
+  <div class="row">
+    <label>类型</label>
+    <select class="typeSel">
+      <option value="active">主动点</option>
+      <option value="passive">被动点</option>
+    </select>
+  </div>
+  <div class="passiveArea" style="display:none">
+    <div class="row">
+      <label>位置来源</label>
+      <select class="locSel">${opts(LOC_TYPE)}</select>
+    </div>
+    <div class="locArea"></div>
+    <div class="row">
+      <label>速度来源</label>
+      <select class="velSel">${opts(VEL_TYPE)}</select>
+    </div>
+    <div class="velArea"></div>
+  </div>
+  <div class="activeArea">
+    <div class="row">
+      <label>初始位置</label>
+      <input type="number" class="startIn" value="0" step="1">
+    </div>
+    <div class="row">
+      <label>速度</label>
+      <input type="number" class="speedIn" value="1" min="0" step="0.1">
+      <select class="dirSel">
+        <option value="-1">向左</option>
+        <option value="1">向右</option>
+        <option value="0">固定</option>
+      </select>
+    </div>
+  </div>`;
+  document.getElementById('dynamicSecs').appendChild(sec);
+  bindSecEvents(sec,id);
+  pointList.push(id);
+  return sec;
+}
+function opts(obj){
+  return Object.keys(obj).map(k=>`<option value="${k}">${obj[k].text}</option>`).join('');
+}
+
+/* ========== 面板内事件绑定 ========== */
+function bindSecEvents(sec,id){
+  const typeSel   = sec.querySelector('.typeSel');
+  const passiveArea=sec.querySelector('.passiveArea');
+  const activeArea =sec.querySelector('.activeArea');
+  typeSel.onchange=()=>{
+    const isPassive=typeSel.value==='passive';
+    passiveArea.style.display=isPassive?'block':'none';
+    activeArea.style.display =isPassive?'none':'block';
   };
-  // 中点模式自动计算
-  if (data.C.src === 'mid') {
-    data.C.start = (data.A.start + data.B.start) / 2;
+  const locSel=sec.querySelector('.locSel'), velSel=sec.querySelector('.velSel');
+  locSel.onchange=()=>buildSubArea(locSel,sec.querySelector('.locArea'),LOC_TYPE);
+  velSel.onchange=()=>buildSubArea(velSel,sec.querySelector('.velArea'),VEL_TYPE);
+  typeSel.onchange();
+  locSel.onchange();
+  velSel.onchange();
+}
+function buildSubArea(sel,area,conf){
+  area.innerHTML='';
+  const needs = conf[sel.value].need || [];
+  needs.forEach(n=>{
+    let row;
+    if(n==='refAB'||n==='refP') row=buildRefSelect(n);
+    else row=buildInput(n);
+    area.appendChild(row);
+  });
+}
+function buildRefSelect(type){
+  const row=$el('div',{className:'row'});
+  const lab=$el('label',{textContent: type==='refAB'?'引用两点':'引用节点'});
+  const sel=$el('select',{});
+  if(type==='refAB'){
+    sel.innerHTML='<option value="A,B">A,B</option>';
+  }else{
+    sel.innerHTML=pointList.map(n=>`<option value="${n}">${n}</option>`).join('');
   }
-  // 传参到动画页
-  localStorage.setItem('motionParams', JSON.stringify(data));
-  location.href = 'animate.html';
+  row.append(lab,sel);
+  return row;
+}
+function buildInput(name){
+  const row=$el('div',{className:'row'});
+  const lab=$el('label',{textContent:{start:'初始位置',offset:'偏移量',ratio:'比例',speed:'速度',dir:'方向'}[name]||name});
+  let ipt;
+  if(name==='dir'){
+    ipt=$el('select',{});
+    ipt.innerHTML=`<option value="-1">向左</option><option value="1">向右</option><option value="0">固定</option>`;
+  }else{
+    ipt=$el('input',{type:'number',step:name==='ratio'?'0.01':'1'});
+    if(name==='ratio') ipt.value='1';
+    if(name==='start') ipt.value='0';
+  }
+  row.append(lab,ipt);
+  return row;
+}
+
+/* ========== 采集数据 & 拓扑检查 ========== */
+function collect(){
+  const data={A:getActiveData('A'),B:getActiveData('B')};
+  const secs=document.querySelectorAll('#dynamicSecs .section');
+  const edges=[]; // 用于拓扑
+  secs.forEach(sec=>{
+    const id=sec.id;
+    const name=sec.querySelector('.nameIn').value.trim()||id;
+    const isPassive=sec.querySelector('.typeSel').value==='passive';
+    if(isPassive){
+      const locType=sec.querySelector('.locSel').value;
+      const velType=sec.querySelector('.velSel').value;
+      const locParam=getSubParams(sec,'.locArea',locType,true);
+      const velParam=getSubParams(sec,'.velArea',velType,false);
+      data[id]={name,locationType:locType,locationParam:locParam,velocityType:velType,velocityParam:velParam};
+      // 收集依赖
+      Object.values(locParam).concat(Object.values(velParam)).forEach(v=>{
+        if(pointList.includes(v)) edges.push([v,id]);
+      });
+    }else{
+      data[id]={name,...getActiveData(id,true)};
+    }
+  });
+  // 简单拓扑（无环即可）
+  const allNodes=Object.keys(data);
+  const deg={}; allNodes.forEach(n=>deg[n]=0);
+  edges.forEach(([u,v])=>deg[v]++);
+  let q=allNodes.filter(n=>deg[n]===0);
+  let cnt=0;
+  while(q.length){
+    const u=q.pop(); cnt++;
+    edges.filter(([_,v])=>v===u).forEach(([uu,vv])=>{ deg[vv]--; if(deg[vv]===0) q.push(vv); });
+  }
+  if(cnt!==allNodes.length){ alert('存在循环依赖，请检查被动点引用'); return null; }
+  return data;
+}
+function getActiveData(prefix,fromSec=false){
+  const root=fromSec?document.getElementById(prefix):document.body;
+  return {
+    start:Number((root.querySelector('#'+prefix+'_start')||root.querySelector('.startIn')).value),
+    speed:Number((root.querySelector('#'+prefix+'_speed')||root.querySelector('.speedIn')).value),
+    dir:Number((root.querySelector('#'+prefix+'_dir')||root.querySelector('.dirSel')).value)
+  };
+}
+function getSubParams(sec,areaSel,type,isLoc){
+  const area=sec.querySelector(areaSel);
+  const conf=isLoc?LOC_TYPE[type]:VEL_TYPE[type];
+  const needs=conf.need||[];
+  const param={};
+  needs.forEach(n=>{
+    if(n==='refAB') param.refAB=area.querySelector('select').value; // 固定 "A,B"
+    else if(n==='refP') param.refP=area.querySelector('select').value;
+    else param[n]=Number(area.querySelector('input[step="'+ (n==='ratio'?'0.01':'1') +'"]').value);
+  });
+  return param;
+}
+
+/* ========== 提交 ========== */
+document.getElementById('goBtn').onclick=()=>{
+  const data=collect();
+  if(!data) return;
+  localStorage.setItem('motionParams',JSON.stringify(data));
+  location.href='animate.html';
 };
+
+/* ========== 默认先加一个第三点 ========== */
+addSection();
 </script>
 </body>
 </html>
