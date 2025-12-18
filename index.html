@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>参数录入</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+body{font-family:Arial;margin:20px;background:#f7f7f7}
+h2{margin-top:0}
+.section{background:#fff;padding:15px;margin-bottom:15px;border:1px solid #ddd;border-radius:4px}
+.row{margin:8px 0;display:flex;align-items:center}
+.row label{width:100px;font-size:14px}
+.row input,select{height:28px;font-size:14px;padding:0 6px}
+button{padding:8px 18px;font-size:15px}
+</style>
+</head>
+<body>
+
+<h2>动点参数录入</h2>
+
+<!-- ===== A点 ===== -->
+<div class="section">
+  <b>A点（常量）</b>
+  <div class="row">
+    <label>初始位置</label>
+    <input type="number" id="A_start" value="-1" step="1">
+  </div>
+  <div class="row">
+    <label>速度</label>
+    <input type="number" id="A_speed" value="1" min="0" step="0.1">
+    <select id="A_dir">
+      <option value="-1">向左</option>
+      <option value="1">向右</option>
+      <option value="0">固定不动</option>
+    </select>
+  </div>
+</div>
+
+<!-- ===== B点 ===== -->
+<div class="section">
+  <b>B点（常量）</b>
+  <div class="row">
+    <label>初始位置</label>
+    <input type="number" id="B_start" value="3" step="1">
+  </div>
+  <div class="row">
+    <label>速度</label>
+    <input type="number" id="B_speed" value="3" min="0" step="0.1">
+    <select id="B_dir">
+      <option value="-1">向左</option>
+      <option value="1">向右</option>
+      <option value="0">固定不动</option>
+    </select>
+  </div>
+</div>
+
+<!-- ===== 第三点 ===== -->
+<div class="section">
+  <b>第三点（主动/被动）</b>
+  <div class="row">
+    <label>名称</label>
+    <input type="text" id="C_name" value="P" maxlength="4">
+  </div>
+  <div class="row">
+    <label>初始来源</label>
+    <select id="C_src">
+      <option value="abs">绝对位置</option>
+      <option value="mid">AB中点</option>
+    </select>
+  </div>
+  <div class="row" id="C_absRow">
+    <label>初始位置</label>
+    <input type="number" id="C_start" value="0" step="1">
+  </div>
+  <div class="row">
+    <label>速度</label>
+    <input type="number" id="C_speed" value="1" min="0" step="0.1">
+    <select id="C_dir">
+      <option value="-1">向左</option>
+      <option value="1">向右</option>
+      <option value="0">固定不动</option>
+    </select>
+  </div>
+</div>
+
+<div class="row">
+  <button id="goBtn">生成动画</button>
+</div>
+
+<script>
+// 切换“绝对位置/中点”时显隐输入框
+document.getElementById('C_src').onchange = e => {
+  document.getElementById('C_absRow').style.display =
+    e.target.value === 'abs' ? 'flex' : 'none';
+};
+
+document.getElementById('goBtn').onclick = () => {
+  const data = {
+    A: {
+      start: Number(document.getElementById('A_start').value),
+      speed: Number(document.getElementById('A_speed').value),
+      dir: Number(document.getElementById('A_dir').value)
+    },
+    B: {
+      start: Number(document.getElementById('B_start').value),
+      speed: Number(document.getElementById('B_speed').value),
+      dir: Number(document.getElementById('B_dir').value)
+    },
+    C: {
+      name: document.getElementById('C_name').value.trim() || 'P',
+      src: document.getElementById('C_src').value,
+      start: Number(document.getElementById('C_start').value),
+      speed: Number(document.getElementById('C_speed').value),
+      dir: Number(document.getElementById('C_dir').value)
+    }
+  };
+  // 中点模式自动计算
+  if (data.C.src === 'mid') {
+    data.C.start = (data.A.start + data.B.start) / 2;
+  }
+  // 传参到动画页
+  localStorage.setItem('motionParams', JSON.stringify(data));
+  location.href = 'animate.html';
+};
+</script>
+</body>
+</html>
