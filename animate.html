@@ -2,34 +2,35 @@
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no">
 <title>动画展示</title>
-<meta name="viewport" content="width=device-width,initial-scale=1">
 <style>
-body{margin:0;font-family:Arial;background:#f7f7f7}
-#param{text-align:center;font-size:14px;color:#333;margin:8px 0}
-#ctrl{text-align:center;margin:10px 0}
-button{margin:0 5px;padding:6px 14px;font-size:14px}
-#canvas{display:block;margin:0 auto;background:#fff;border:1px solid #ccc}
+html,body{margin:0;height:100%;overflow-x:hidden;background:#f7f7f7;font-family:Arial}
+#param{box-sizing:border-box;padding:6px 10px;text-align:center;font-size:14px;color:#333;background:#fff;border-bottom:1px solid #ddd}
+#ctrl{box-sizing:border-box;padding:8px;text-align:center;background:#fff;border-top:1px solid #ddd}
+button{margin:0 4px;padding:6px 14px;font-size:14px}
+#canvasWrap{display:flex;align-items:center;justify-content:center;background:#fff;flex:1}
+canvas{display:block}
 </style>
 </head>
 <body>
-
 <div id="param"></div>
 <div id="ctrl">
   <button id="playPauseBtn">播放</button>
   <button id="resetBtn">重置</button>
 </div>
-<canvas id="canvas" width="700" height="180"></canvas>
+<div id="canvasWrap">
+  <canvas id="canvas"></canvas>
+</div>
 
 <script>
 /* ---------- 取参数 ---------- */
 const cfg = JSON.parse(localStorage.getItem('motionParams') || '{}');
-if (!cfg.A) {          // 防止直接刷新本页无数据
+if (!cfg.A) {
   alert('请先返回首页录入参数');
   location.href = 'index.html';
 }
-
-/* ---------- 把参数变成文字 ---------- */
+/* ---------- 参数描述 ---------- */
 function desc(p, name) {
   const dir = p.dir === 0 ? '固定不动' : (p.dir > 0 ? '向右' : '向左');
   return `${name}：初始${p.start}，速度${p.speed}单位/s${dir}`;
@@ -37,57 +38,79 @@ function desc(p, name) {
 document.getElementById('param').textContent =
   [desc(cfg.A,'A'), desc(cfg.B,'B'), desc(cfg.C, cfg.C.name)].join('；');
 
-/* ---------- 动画相关 ---------- */
+/* ---------- 画布初始化 ---------- */
 const canvas = document.getElementById('canvas');
 const ctx    = canvas.getContext('2d');
-const playPauseBtn = document.getElementById('playPauseBtn');
-const resetBtn     = document.getElementById('resetBtn');
+function resizeCanvas() {
+  const padH = document.getElementById('param').offsetHeight +
+               document.getElementById('ctrl').offsetHeight;
+  const availW = window.innerWidth;
+  const availH = window.innerHeight - padH;
+  let targetW = availW;
+  let targetH = Math.min(availH, Math.round(availW * 0.75));
+  if (targetH > availH) {
+    targetH = availH;
+    targetW = Math.min(availW, Math.round(availH / 0.75));
+  }
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width  = targetW * dpr;
+  canvas.height = targetH * dpr;
+  canvas.style.width  = targetW + 'px';
+  canvas.style.height = targetH + 'px';
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  drawAxis();
+  reset();
+}
+window.addEventListener('resize', resizeCanvas);
 
-let running = false, t = 0, lastTS = null;
-
-/* 统一数据结构，方便循环 */
+/* ---------- 动点数据 ---------- */
 const pts = {
   A: { start: cfg.A.start, v: cfg.A.dir * cfg.A.speed, color: '#ff4d4f' },
   B: { start: cfg.B.start, v: cfg.B.dir * cfg.B.speed, color: '#1890ff' },
   [cfg.C.name]: { start: cfg.C.start, v: cfg.C.dir * cfg.C.speed, color: '#52c41a' }
 };
 
+/* ---------- 绘图 ---------- */
 function drawAxis() {
-  const w = canvas.width, h = canvas.height;
-  const margin = 40, left = margin, right = w - margin, midY = h / 2;
+  const w = canvas.clientWidth, h = canvas.clientHeight;
+  const margin = 20, left = margin, right = w - margin, midY = h / 2;
   ctx.clearRect(0, 0, w, h);
   ctx.strokeStyle = '#666'; ctx.lineWidth = 2;
   ctx.beginPath(); ctx.moveTo(left, midY); ctx.lineTo(right, midY); ctx.stroke();
 
-  const step = 40, zeroX = w / 2;
+  const step = Math.max(30, Math.floor(w / 18)); // 动态刻度
+  const zeroX = w / 2;
   for (let i = -10; i <= 10; i++) {
     const x = zeroX + i * step;
     if (x < left || x > right) continue;
-    ctx.beginPath(); ctx.moveTo(x, midY - 5); ctx.lineTo(x, midY + 5); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(x, midY - 4); ctx.lineTo(x, midY + 4); ctx.stroke();
     ctx.fillStyle = '#666'; ctx.font = '12px sans-serif'; ctx.textAlign = 'center';
-    ctx.fillText(i, x, midY + 20);
+    ctx.fillText(i, x, midY + 16);
   }
 }
 
 function drawPoint(pos, color, label) {
-  const zeroX = canvas.width / 2, midY = canvas.height / 2, step = 40;
+  const zeroX = canvas.clientWidth / 2, midY = canvas.clientHeight / 2;
+  const step  = Math.max(30, Math.floor(canvas.clientWidth / 18));
   const x = zeroX + pos * step;
-  ctx.beginPath(); ctx.arc(x, midY, 8, 0, Math.PI * 2);
+  ctx.beginPath(); ctx.arc(x, midY, 7, 0, Math.PI * 2);
   ctx.fillStyle = color; ctx.fill();
   ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.stroke();
   ctx.fillStyle = '#000'; ctx.font = '14px sans-serif'; ctx.textAlign = 'center';
-  ctx.fillText(label, x, midY - 15);
+  ctx.fillText(label, x, midY - 12);
 }
+
+/* ---------- 动画控制 ---------- */
+let running = false, t = 0, lastTS = null;
+const playPauseBtn = document.getElementById('playPauseBtn');
+const resetBtn     = document.getElementById('resetBtn');
 
 function frame(ts) {
   if (!running) return;
   if (!lastTS) lastTS = ts;
   const dt = (ts - lastTS) / 1000; lastTS = ts; t += dt;
   drawAxis();
-  Object.keys(pts).forEach(k => {
-    const p = pts[k];
-    drawPoint(p.start + p.v * t, p.color, k);
-  });
+  Object.keys(pts).forEach(k => drawPoint(pts[k].start + pts[k].v * t, pts[k].color, k));
   requestAnimationFrame(frame);
 }
 
@@ -106,8 +129,8 @@ playPauseBtn.onclick = () => {
 };
 resetBtn.onclick = reset;
 
-/* ---------- 初始 ---------- */
-reset();
+/* ---------- 首次进入 ---------- */
+resizeCanvas();
 </script>
 </body>
 </html>
