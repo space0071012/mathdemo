@@ -14,6 +14,7 @@ canvas{display:block}
 </style>
 </head>
 <body>
+
 <div id="param"></div>
 <div id="ctrl">
   <button id="playPauseBtn">播放</button>
@@ -25,147 +26,118 @@ canvas{display:block}
 
 <script>
 /* ---------- 取参数 ---------- */
-const cfg = JSON.parse(localStorage.getItem('motionParams') || '{}');
-if (!cfg.A) {
-  alert('请先返回首页录入参数');
-  location.href = 'index.html';
-}
-/* ---------- 参数描述 ---------- */
-function desc(p, name) {
-  const dir = p.dir === 0 ? '固定不动' : (p.dir > 0 ? '向右' : '向左');
-  return `${name}：初始${p.start}，速度${p.speed}单位/s${dir}`;
-}
-document.getElementById('param').textContent =
-  [desc(cfg.A,'A'), desc(cfg.B,'B'), desc(cfg.C, cfg.C.name)].join('；');
-
-/* ---------- 画布初始化 ---------- */
-const canvas = document.getElementById('canvas');
-const ctx    = canvas.getContext('2d');
-function resizeCanvas() {
-  const padH = document.getElementById('param').offsetHeight +
-               document.getElementById('ctrl').offsetHeight;
-  const availW = window.innerWidth;
-  const availH = window.innerHeight - padH;
-  let targetW = availW;
-  let targetH = Math.min(availH, Math.round(availW * 0.75));
-  if (targetH > availH) {
-    targetH = availH;
-    targetW = Math.min(availW, Math.round(availH / 0.75));
-  }
-  const dpr = window.devicePixelRatio || 1;
-  canvas.width  = targetW * dpr;
-  canvas.height = targetH * dpr;
-  canvas.style.width  = targetW + 'px';
-  canvas.style.height = targetH + 'px';
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  drawAxis();
-  reset();
-}
-window.addEventListener('resize', resizeCanvas);
-
-/* ---------- 动点数据 ---------- */
-{% comment %} const pts = {
-  A: { start: cfg.A.start, v: cfg.A.dir * cfg.A.speed, color: '#ff4d4f' },
-  B: { start: cfg.B.start, v: cfg.B.dir * cfg.B.speed, color: '#1890ff' },
-  [cfg.C.name]: { start: cfg.C.start, v: cfg.C.dir * cfg.C.speed, color: '#52c41a' }
-}; {% endcomment %}
+const all = JSON.parse(localStorage.getItem('motionParams')||'{}');
+if (!all.A) { alert('请先返回首页录入参数'); location.href='index.html'; }
 
 /* ---------- 把新结构统一转成 {start, v} ---------- */
 function expand(pv){
-  // 位置
-  let s=0;
-  switch(pv.locationType){
-    case 'abs':        s=pv.locationParam.start; break;
-    case 'mid':        const [a,b]=pv.locationParam.refAB.split(',').map(n=>expand(all[n]).start);
-                       s=(a+b)/2; break;
-    case 'offsetAbs':  s=expand(all[pv.locationParam.refP]).start+pv.locationParam.offset; break;
-    default:           s=0;  // 先留空，后续加 case
-  }
-  // 速度
-  let v=0;
-  switch(pv.velocityType){
-    case 'abs':     v=pv.velocityParam.dir*pv.velocityParam.speed; break;
-    case 'same':    v=expand(all[pv.velocityParam.refP]).v; break;
-    case 'opposite':v=-expand(all[pv.velocityParam.refP]).v; break;
-    case 'ratio':   v=expand(all[pv.velocityParam.refP]).v*pv.velocityParam.ratio; break;
-    default:        v=0;
+  let s=0, v=0;
+  if(pv.start!==undefined){                    // 主动点
+    s=pv.start; v=pv.dir*pv.speed;
+  }else{                                       // 被动点
+    // 位置
+    switch(pv.locationType){
+      case 'abs':        s=pv.locationParam.start; break;
+      case 'mid':        const [a,b]=pv.locationParam.refAB.split(',').map(n=>expand(all[n]).start);
+                         s=(a+b)/2; break;
+      case 'offsetAbs':  s=expand(all[pv.locationParam.refP]).start+pv.locationParam.offset; break;
+      default:           s=0;
+    }
+    // 速度
+    switch(pv.velocityType){
+      case 'abs':     v=pv.velocityParam.dir*pv.velocityParam.speed; break;
+      case 'same':    v=expand(all[pv.velocityParam.refP]).v; break;
+      case 'opposite':v=-expand(all[pv.velocityParam.refP]).v; break;
+      case 'ratio':   v=expand(all[pv.velocityParam.refP]).v*pv.velocityParam.ratio; break;
+      default:        v=0;
+    }
   }
   return {start:s, v:v};
 }
 
-/* ---------- 先展开 A/B ---------- */
-const all = JSON.parse(localStorage.getItem('motionParams')||'{}');
-const pts = {};
-['A','B'].forEach(k=>{
-  const raw=all[k];
-  pts[k]={start:raw.start, v:raw.dir*raw.speed, color:k==='A'?'#ff4d4f':'#1890ff'};
-});
-
-/* ---------- 再展开被动点 ---------- */
+/* ---------- 展开所有点 ---------- */
+const pts={};
 Object.keys(all).forEach(k=>{
-  if(['A','B'].includes(k)) return;
   const ex=expand(all[k]);
-  pts[k]={start:ex.start, v:ex.v, color:'#52c41a'};
+  pts[k]={start:ex.start, v:ex.v, color: k==='A'?'#ff4d4f':k==='B'?'#1890ff':'#52c41a'};
 });
 
-/* ---------- 绘图 ---------- */
-function drawAxis() {
-  const w = canvas.clientWidth, h = canvas.clientHeight;
-  const margin = 20, left = margin, right = w - margin, midY = h / 2;
-  ctx.clearRect(0, 0, w, h);
-  ctx.strokeStyle = '#666'; ctx.lineWidth = 2;
-  ctx.beginPath(); ctx.moveTo(left, midY); ctx.lineTo(right, midY); ctx.stroke();
-
-  const step = Math.max(30, Math.floor(w / 18)); // 动态刻度
-  const zeroX = w / 2;
-  for (let i = -10; i <= 10; i++) {
-    const x = zeroX + i * step;
-    if (x < left || x > right) continue;
-    ctx.beginPath(); ctx.moveTo(x, midY - 4); ctx.lineTo(x, midY + 4); ctx.stroke();
-    ctx.fillStyle = '#666'; ctx.font = '12px sans-serif'; ctx.textAlign = 'center';
-    ctx.fillText(i, x, midY + 16);
+/* ---------- 描述文字 ---------- */
+function desc(id){
+  const p=all[id];
+  if(p.start!==undefined){          // 主动
+    const dir=p.dir===0?'固定':(p.dir>0?'向右':'向左');
+    return `${id}：初始${p.start}，速度${p.speed}单位/s${dir}`;
+  }else{                            // 被动
+    return `${id}：${p.locationType}+${p.velocityType}`;
   }
 }
+document.getElementById('param').textContent=
+  Object.keys(all).map(id=>desc(id)).join('；');
 
-function drawPoint(pos, color, label) {
-  const zeroX = canvas.clientWidth / 2, midY = canvas.clientHeight / 2;
-  const step  = Math.max(30, Math.floor(canvas.clientWidth / 18));
-  const x = zeroX + pos * step;
-  ctx.beginPath(); ctx.arc(x, midY, 7, 0, Math.PI * 2);
-  ctx.fillStyle = color; ctx.fill();
-  ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.stroke();
-  ctx.fillStyle = '#000'; ctx.font = '14px sans-serif'; ctx.textAlign = 'center';
-  ctx.fillText(label, x, midY - 12);
+/* ---------- 画布自适应 ---------- */
+const canvas=document.getElementById('canvas');
+const ctx=canvas.getContext('2d');
+function resizeCanvas(){
+  const padH=document.getElementById('param').offsetHeight+document.getElementById('ctrl').offsetHeight;
+  const availW=window.innerWidth;
+  const availH=window.innerHeight-padH;
+  let targetW=availW;
+  let targetH=Math.min(availH,Math.round(availW*0.75));
+  if(targetH>availH){targetH=availH;targetW=Math.min(availW,Math.round(availH/0.75));}
+  const dpr=window.devicePixelRatio||1;
+  canvas.width=targetW*dpr; canvas.height=targetH*dpr;
+  canvas.style.width=targetW+'px'; canvas.style.height=targetH+'px';
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+  drawAxis(); reset();
+}
+window.addEventListener('resize',resizeCanvas);
+
+/* ---------- 绘图 ---------- */
+function drawAxis(){
+  const w=canvas.clientWidth,h=canvas.clientHeight;
+  const margin=20,left=margin,right=w-margin,midY=h/2;
+  ctx.clearRect(0,0,w,h);
+  ctx.strokeStyle='#666';ctx.lineWidth=2;
+  ctx.beginPath();ctx.moveTo(left,midY);ctx.lineTo(right,midY);ctx.stroke();
+  const step=Math.max(30,Math.floor(w/18)),zeroX=w/2;
+  for(let i=-10;i<=10;i++){
+    const x=zeroX+i*step;if(x<left||x>right)continue;
+    ctx.beginPath();ctx.moveTo(x,midY-4);ctx.lineTo(x,midY+4);ctx.stroke();
+    ctx.fillStyle='#666';ctx.font='12px sans-serif';ctx.textAlign='center';ctx.fillText(i,x,midY+16);
+  }
+}
+function drawPoint(pos,color,label){
+  const zeroX=canvas.clientWidth/2,midY=canvas.clientHeight/2;
+  const step=Math.max(30,Math.floor(canvas.clientWidth/18));
+  const x=zeroX+pos*step;
+  ctx.beginPath();ctx.arc(x,midY,7,0,Math.PI*2);
+  ctx.fillStyle=color;ctx.fill();ctx.strokeStyle='#fff';ctx.lineWidth=2;ctx.stroke();
+  ctx.fillStyle='#000';ctx.font='14px sans-serif';ctx.textAlign='center';ctx.fillText(label,x,midY-12);
 }
 
 /* ---------- 动画控制 ---------- */
-let running = false, t = 0, lastTS = null;
-const playPauseBtn = document.getElementById('playPauseBtn');
-const resetBtn     = document.getElementById('resetBtn');
+let running=false,t=0,lastTS=null;
+const playPauseBtn=document.getElementById('playPauseBtn');
+const resetBtn=document.getElementById('resetBtn');
 
-function frame(ts) {
-  if (!running) return;
-  if (!lastTS) lastTS = ts;
-  const dt = (ts - lastTS) / 1000; lastTS = ts; t += dt;
+function frame(ts){
+  if(!running)return;
+  if(!lastTS)lastTS=ts;
+  const dt=(ts-lastTS)/1000;lastTS=ts;t+=dt;
   drawAxis();
-  Object.keys(pts).forEach(k => drawPoint(pts[k].start + pts[k].v * t, pts[k].color, k));
+  Object.keys(pts).forEach(k=>drawPoint(pts[k].start+pts[k].v*t,pts[k].color,k));
   requestAnimationFrame(frame);
 }
-
-function updateBtn() { playPauseBtn.textContent = running ? '暂停' : '播放'; }
-
-function reset() {
-  running = false; t = 0; lastTS = null;
+function updateBtn(){playPauseBtn.textContent=running?'暂停':'播放';}
+function reset(){
+  running=false;t=0;lastTS=null;
   drawAxis();
-  Object.keys(pts).forEach(k => drawPoint(pts[k].start, pts[k].color, k));
+  Object.keys(pts).forEach(k=>drawPoint(pts[k].start,pts[k].color,k));
   updateBtn();
 }
-
-playPauseBtn.onclick = () => {
-  running = !running; updateBtn();
-  if (running) { lastTS = null; requestAnimationFrame(frame); }
-};
-resetBtn.onclick = reset;
+playPauseBtn.onclick=()=>{running=!running;updateBtn();if(running){lastTS=null;requestAnimationFrame(frame);}};
+resetBtn.onclick=reset;
 
 /* ---------- 首次进入 ---------- */
 resizeCanvas();
