@@ -7,6 +7,7 @@
 <style>
 html,body{margin:0;height:100%;overflow-x:hidden;background:#f7f7f7;font-family:Arial}
 #param{box-sizing:border-box;padding:6px 10px;text-align:center;font-size:14px;color:#333;background:#fff;border-bottom:1px solid #ddd}
+#info{box-sizing:border-box;padding:6px 10px;text-align:center;font-size:14px;color:#333;background:#fff;border-bottom:1px solid #ddd}
 #ctrl{box-sizing:border-box;padding:8px;text-align:center;background:#fff;border-top:1px solid #ddd}
 button{margin:0 4px;padding:6px 14px;font-size:14px}
 #canvasWrap{display:flex;align-items:center;justify-content:center;background:#fff;flex:1}
@@ -16,9 +17,11 @@ canvas{display:block}
 <body>
 
 <div id="param"></div>
+<div id="info">t = 0.00 s</div>
 <div id="ctrl">
   <button id="playPauseBtn">播放</button>
   <button id="resetBtn">重置</button>
+  <button id="backBtn">返回设置</button>
 </div>
 <div id="canvasWrap">
   <canvas id="canvas"></canvas>
@@ -29,115 +32,208 @@ canvas{display:block}
 const all = JSON.parse(localStorage.getItem('motionParams')||'{}');
 if (!all.A) { alert('请先返回首页录入参数'); location.href='index.html'; }
 
-/* ---------- 把新结构统一转成 {start, v} ---------- */
-function expand(pv){
-  let s=0, v=0;
-  if(pv.start!==undefined){                    // 主动点
-    s=pv.start; v=pv.dir*pv.speed;
-  }else{                                       // 被动点
-    // 位置
+/* ---------- 展开成 {start,v,color} ---------- */
+function expand(pv, visited = new Set()){
+  // 防止循环依赖
+  if(visited.has(pv)) return {start:0, v:0, color:'#000000'};
+  visited.add(pv);
+  
+  let s=0, v=0, color = pv.color || '#52c41a';
+  
+  if(pv.start !== undefined){
+    s = pv.start; 
+    v = pv.dir * pv.speed;
+  } else {
+    // 处理位置
     switch(pv.locationType){
-      case 'abs':        s=pv.locationParam.start; break;
-      case 'mid':        const [a,b]=pv.locationParam.refAB.split(',').map(n=>expand(all[n]).start);
-                         s=(a+b)/2; break;
-      case 'offsetAbs':  s=expand(all[pv.locationParam.refP]).start+pv.locationParam.offset; break;
-      default:           s=0;
+      case 'abs':        
+        s = pv.locationParam.start; 
+        break;
+      case 'mid':        
+        const [aKey, bKey] = pv.locationParam.refAB.split(',');
+        const aPoint = expand(all[aKey], new Set([...visited]));
+        const bPoint = expand(all[bKey], new Set([...visited]));
+        s = (aPoint.start + bPoint.start) / 2; 
+        break;
+      case 'offsetAbs':  
+        const refP1 = expand(all[pv.locationParam.refP], new Set([...visited]));
+        s = refP1.start + pv.locationParam.offset; 
+        break;
+      case 'offsetRatio':
+        const refP2 = expand(all[pv.locationParam.refP], new Set([...visited]));
+        s = refP2.start * pv.locationParam.ratio; 
+        break;
+      case 'segRatio':
+        const [aKey2, bKey2] = pv.locationParam.refAB.split(',');
+        const aPoint2 = expand(all[aKey2], new Set([...visited]));
+        const bPoint2 = expand(all[bKey2], new Set([...visited]));
+        const ratio = pv.locationParam.ratio || 1;
+        s = (aPoint2.start + ratio * bPoint2.start) / (1 + ratio);
+        break;
+      default:           
+        s=0;
     }
-    // 速度
+    
+    // 处理速度
     switch(pv.velocityType){
-      case 'abs':     v=pv.velocityParam.dir*pv.velocityParam.speed; break;
-      case 'same':    v=expand(all[pv.velocityParam.refP]).v; break;
-      case 'opposite':v=-expand(all[pv.velocityParam.refP]).v; break;
-      case 'ratio':   v=expand(all[pv.velocityParam.refP]).v*pv.velocityParam.ratio; break;
-      default:        v=0;
+      case 'abs':     
+        v = pv.velocityParam.dir * pv.velocityParam.speed; 
+        break;
+      case 'same':    
+        const refP3 = expand(all[pv.velocityParam.refP], new Set([...visited]));
+        v = refP3.v; 
+        break;
+      case 'opposite':
+        const refP4 = expand(all[pv.velocityParam.refP], new Set([...visited]));
+        v = -refP4.v; 
+        break;
+      case 'ratio':   
+        const refP5 = expand(all[pv.velocityParam.refP], new Set([...visited]));
+        v = refP5.v * pv.velocityParam.ratio; 
+        break;
+      default:        
+        v=0;
     }
   }
-  return {start:s, v:v};
+  
+  return {start:s, v:v, color: color};
 }
 
-/* ---------- 展开所有点 ---------- */
 const pts={};
-Object.keys(all).forEach(k=>{
-  const ex=expand(all[k]);
-  pts[k]={start:ex.start, v:ex.v, color: k==='A'?'#ff4d4f':k==='B'?'#1890ff':'#52c41a'};
+Object.keys(all).forEach(k=> {
+  pts[k] = expand(all[k]);
 });
 
 /* ---------- 描述文字 ---------- */
 function desc(id){
   const p=all[id];
-  if(p.start!==undefined){          // 主动
-    const dir=p.dir===0?'固定':(p.dir>0?'向右':'向左');
-    return `${id}：初始${p.start}，速度${p.speed}单位/s${dir}`;
-  }else{                            // 被动
-    return `${id}：${p.locationType}+${p.velocityType}`;
+  const name = p.name || id;
+  
+  if(p.start !== undefined){
+    return `${name}：初始${p.start.toFixed(1)}，速度${(p.dir * p.speed).toFixed(1)}`;
+  } else {
+    let locDesc = '';
+    switch(p.locationType){
+      case 'abs': locDesc = `位置=${p.locationParam.start}`; break;
+      case 'mid': locDesc = `${p.locationParam.refAB}中点`; break;
+      case 'offsetAbs': locDesc = `相对${p.locationParam.refP}偏移${p.locationParam.offset}`; break;
+      case 'offsetRatio': locDesc = `相对${p.locationParam.refP}比例${p.locationParam.ratio}`; break;
+      case 'segRatio': locDesc = `${p.locationParam.refAB}分点${p.locationParam.ratio}`; break;
+      default: locDesc = '未知位置';
+    }
+    
+    let velDesc = '';
+    switch(p.velocityType){
+      case 'abs': velDesc = `速度=${(p.velocityParam.dir * p.velocityParam.speed).toFixed(1)}`; break;
+      case 'same': velDesc = `与${p.velocityParam.refP}同速`; break;
+      case 'opposite': velDesc = `与${p.velocityParam.refP}反向`; break;
+      case 'ratio': velDesc = `与${p.velocityParam.refP}成比例${p.velocityParam.ratio}`; break;
+      default: velDesc = '未知速度';
+    }
+    
+    return `${name}：${locDesc}，${velDesc}`;
   }
 }
-document.getElementById('param').textContent=
-  Object.keys(all).map(id=>desc(id)).join('；');
+
+document.getElementById('param').textContent=Object.keys(all).map(id=>desc(id)).join('；');
 
 /* ---------- 画布自适应 ---------- */
 const canvas=document.getElementById('canvas');
 const ctx=canvas.getContext('2d');
 function resizeCanvas(){
-  const padH=document.getElementById('param').offsetHeight+document.getElementById('ctrl').offsetHeight;
+  const padH=document.getElementById('param').offsetHeight+document.getElementById('info').offsetHeight+document.getElementById('ctrl').offsetHeight;
   const availW=window.innerWidth;
   const availH=window.innerHeight-padH;
   let targetW=availW;
   let targetH=Math.min(availH,Math.round(availW*0.75));
   if(targetH>availH){targetH=availH;targetW=Math.min(availW,Math.round(availH/0.75));}
   const dpr=window.devicePixelRatio||1;
-  canvas.width=targetW*dpr; canvas.height=targetH*dpr;
-  canvas.style.width=targetW+'px'; canvas.style.height=targetH+'px';
+  canvas.width=targetW*dpr;canvas.height=targetH*dpr;
+  canvas.style.width=targetW+'px';canvas.style.height=targetH+'px';
   ctx.setTransform(dpr,0,0,dpr,0,0);
-  drawAxis(); reset();
+  drawAxis();reset();
 }
 window.addEventListener('resize',resizeCanvas);
 
 /* ---------- 绘图 ---------- */
 function drawAxis(){
   const w=canvas.clientWidth,h=canvas.clientHeight;
-  const margin=20,left=margin,right=w-margin,midY=h/2;
+  const margin=40,left=margin,right=w-margin,midY=h/2;
   ctx.clearRect(0,0,w,h);
   ctx.strokeStyle='#666';ctx.lineWidth=2;
   ctx.beginPath();ctx.moveTo(left,midY);ctx.lineTo(right,midY);ctx.stroke();
-  const step=Math.max(30,Math.floor(w/18)),zeroX=w/2;
+  const step=Math.max(30,Math.floor((w-2*margin)/20)),zeroX=w/2;
   for(let i=-10;i<=10;i++){
     const x=zeroX+i*step;if(x<left||x>right)continue;
     ctx.beginPath();ctx.moveTo(x,midY-4);ctx.lineTo(x,midY+4);ctx.stroke();
     ctx.fillStyle='#666';ctx.font='12px sans-serif';ctx.textAlign='center';ctx.fillText(i,x,midY+16);
   }
 }
+
 function drawPoint(pos,color,label){
-  const zeroX=canvas.clientWidth/2,midY=canvas.clientHeight/2;
-  const step=Math.max(30,Math.floor(canvas.clientWidth/18));
+  const w=canvas.clientWidth,h=canvas.clientHeight;
+  const margin=40,left=margin,right=w-margin,midY=h/2;
+  const step=Math.max(30,Math.floor((w-2*margin)/20)),zeroX=w/2;
   const x=zeroX+pos*step;
-  ctx.beginPath();ctx.arc(x,midY,7,0,Math.PI*2);
-  ctx.fillStyle=color;ctx.fill();ctx.strokeStyle='#fff';ctx.lineWidth=2;ctx.stroke();
-  ctx.fillStyle='#000';ctx.font='14px sans-serif';ctx.textAlign='center';ctx.fillText(label,x,midY-12);
+  
+  // 确保点在可见范围内
+  if(x < left || x > right) return;
+  
+  ctx.beginPath();ctx.arc(x,midY,8,0,Math.PI*2);
+  ctx.fillStyle=color;ctx.fill();
+  ctx.strokeStyle='#fff';ctx.lineWidth=2;ctx.stroke();
+  ctx.fillStyle='#000';ctx.font='14px sans-serif';ctx.textAlign='center';
+  ctx.fillText(label,x,midY-15);
+}
+
+/* ---------- 底部实时信息 ---------- */
+const info=document.getElementById('info');
+function updateInfo(){
+  const pcs=Object.keys(pts).map(k=>{
+    const name=all[k].name||k;
+    const pos = pts[k].start+pts[k].v*t;
+    return `${name}=${pos.toFixed(2)}`;
+  }).join(' ');
+  info.textContent=`t = ${t.toFixed(2)} s ${pcs}`;
 }
 
 /* ---------- 动画控制 ---------- */
 let running=false,t=0,lastTS=null;
 const playPauseBtn=document.getElementById('playPauseBtn');
 const resetBtn=document.getElementById('resetBtn');
+const backBtn=document.getElementById('backBtn');
 
 function frame(ts){
   if(!running)return;
   if(!lastTS)lastTS=ts;
   const dt=(ts-lastTS)/1000;lastTS=ts;t+=dt;
   drawAxis();
-  Object.keys(pts).forEach(k=>drawPoint(pts[k].start+pts[k].v*t,pts[k].color,k));
+  Object.keys(pts).forEach(k=>drawPoint(pts[k].start+pts[k].v*t,pts[k].color,all[k].name||k));
+  updateInfo();
   requestAnimationFrame(frame);
 }
+
 function updateBtn(){playPauseBtn.textContent=running?'暂停':'播放';}
+
 function reset(){
   running=false;t=0;lastTS=null;
   drawAxis();
-  Object.keys(pts).forEach(k=>drawPoint(pts[k].start,pts[k].color,k));
+  Object.keys(pts).forEach(k=>drawPoint(pts[k].start,pts[k].color,all[k].name||k));
+  updateInfo();
   updateBtn();
 }
-playPauseBtn.onclick=()=>{running=!running;updateBtn();if(running){lastTS=null;requestAnimationFrame(frame);}};
+
+playPauseBtn.onclick=()=>{
+  running=!running;
+  updateBtn();
+  if(running){
+    lastTS=null;
+    requestAnimationFrame(frame);
+  }
+};
+
 resetBtn.onclick=reset;
+backBtn.onclick=()=>{location.href='index.html';};
 
 /* ---------- 首次进入 ---------- */
 resizeCanvas();

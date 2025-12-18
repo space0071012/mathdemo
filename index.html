@@ -3,58 +3,51 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>参数录入（可扩展版）</title>
+<title>参数录入（最终版）</title>
 <style>
 body{font-family:Arial;margin:0;background:#f7f7f7;padding:10px}
 h2{margin-top:0}
 .section{background:#fff;padding:12px;margin-bottom:10px;border:1px solid #ddd;border-radius:4px}
 .row{margin:6px 0;display:flex;align-items:center}
 .row label{width:110px;font-size:14px}
-.row input,select{height:28px;font-size:14px;padding:0 6px}
+.row input,select{height:28px;font-size:14px;padding:0 6px;flex:1}
 button{padding:8px 16px;font-size:15px}
+.colorSel{width:120px;font-weight:bold}
+.optLight{color:#fff;background:var(--c)}
+.optDark {color:#000;background:var(--c)}
 </style>
 </head>
 <body>
 
-<h2>动点参数录入（主动/被动通用）</h2>
+<h2>动点参数录入（带颜色预览）</h2>
 
 <!-- A 点 -->
 <div class="section" id="asec">
   <b>A 点</b>
   <div class="row">
-    <label>初始位置</label>
-    <input type="number" id="A_start" value="-1" step="1">
+    <label>名称</label>
+    <input type="text" id="A_name" value="A" maxlength="4">
   </div>
-  <div class="row">
-    <label>速度</label>
-    <input type="number" id="A_speed" value="1" min="0" step="0.1">
-    <select id="A_dir">
-      <option value="-1">向左</option>
-      <option value="1">向右</option>
-      <option value="0">固定</option>
-    </select>
-  </div>
+  <div class="row"><label>初始位置</label><input type="number" id="A_start" value="-1" step="1"></div>
+  <div class="row"><label>速度</label><input type="number" id="A_speed" value="1" min="0" step="0.1">
+    <select id="A_dir"><option value="-1">向左</option><option value="1">向右</option><option value="0">固定</option></select></div>
+  <div class="row"><label>颜色</label><select id="A_color" class="colorSel"></select></div>
 </div>
 
 <!-- B 点 -->
 <div class="section" id="bsec">
   <b>B 点</b>
   <div class="row">
-    <label>初始位置</label>
-    <input type="number" id="B_start" value="3" step="1">
+    <label>名称</label>
+    <input type="text" id="B_name" value="B" maxlength="4">
   </div>
-  <div class="row">
-    <label>速度</label>
-    <input type="number" id="B_speed" value="3" min="0" step="0.1">
-    <select id="B_dir">
-      <option value="-1">向左</option>
-      <option value="1">向右</option>
-      <option value="0">固定</option>
-    </select>
-  </div>
+  <div class="row"><label>初始位置</label><input type="number" id="B_start" value="3" step="1"></div>
+  <div class="row"><label>速度</label><input type="number" id="B_speed" value="3" min="0" step="0.1">
+    <select id="B_dir"><option value="-1">向左</option><option value="1">向右</option><option value="0">固定</option></select></div>
+  <div class="row"><label>颜色</label><select id="B_color" class="colorSel"></select></div>
 </div>
 
-<!-- 动态增加的点 -->
+<!-- 动态点 -->
 <div id="dynamicSecs"></div>
 
 <div class="row">
@@ -63,7 +56,29 @@ button{padding:8px 16px;font-size:15px}
 </div>
 
 <script>
-/* ---- 极简 DOM 助手 ---- */
+/* 高对比颜色表 */
+const COLOR_LIST=[
+  {hex:'#FF0000',name:'红'}, {hex:'#00BFFF',name:'亮蓝'}, {hex:'#32CD32',name:'绿'},
+  {hex:'#FF8C00',name:'橙'}, {hex:'#BA55D3',name:'紫'}, {hex:'#FFD700',name:'金'},
+  {hex:'#FF1493',name:'粉'}, {hex:'#000000',name:'黑'}
+];
+function makeColorSelect(selId,defaultIdx=0){
+  const sel=document.getElementById(selId);
+  if(!sel) return;
+  sel.innerHTML='';
+  COLOR_LIST.forEach((c,i)=>{
+    const opt=document.createElement('option');
+    opt.value=c.hex; opt.textContent=c.name;
+    const rgb=parseInt(c.hex.slice(1),16);
+    const r=(rgb>>16)&0xff,g=(rgb>>8)&0xff,b=rgb&0xff;
+    const br=(0.299*r+0.587*g+0.114*b)/255;
+    opt.className=br>0.5?'optDark':'optLight';
+    opt.style.cssText=`background:${c.hex};`;
+    if(i===defaultIdx) opt.selected=true;
+    sel.appendChild(opt);
+  });
+}
+
 const $el=(tag,attr={},children=[])=>{
   const e=document.createElement(tag);
   Object.keys(attr).forEach(k=>e[k]=attr[k]);
@@ -71,34 +86,33 @@ const $el=(tag,attr={},children=[])=>{
   return e;
 };
 
-/* 原子类型配置 */
-const LOC_TYPE={
-  abs:        {text:'绝对坐标',        need:['start']},
-  mid:        {text:'两点中点',        need:['refAB']},
-  segRatio:   {text:'定比分点',        need:['refAB','ratio']},
-  offsetAbs:  {text:'相对某点偏移',    need:['refP','offset']},
-  offsetRatio:{text:'相对某点比例',    need:['refP','ratio']}
-};
-const VEL_TYPE={
-  abs:     {text:'绝对速度',   need:['speed','dir']},
-  same:    {text:'与某点同速', need:['refP']},
-  opposite:{text:'与某点反向', need:['refP']},
-  ratio:   {text:'与某点成比例',need:['refP','ratio']}
-};
+const LOC_TYPE={abs:{text:'绝对坐标',need:['start']},mid:{text:'两点中点',need:['refAB']},segRatio:{text:'定比分点',need:['refAB','ratio']},offsetAbs:{text:'相对某点偏移',need:['refP','offset']},offsetRatio:{text:'相对某点比例',need:['refP','ratio']}};
+const VEL_TYPE={abs:{text:'绝对速度',need:['speed','dir']},same:{text:'与某点同速',need:['refP']},opposite:{text:'与某点反向',need:['refP']},ratio:{text:'与某点成比例',need:['refP','ratio']}};
 
-let pointList=['A','B']; // 已创建节点
-let counter  =0;         // ID 生成
+let pointList=['A','B'];
+let counter  =0;
 
-/* 添加新点面板 */
 function addSection(){
   const id='P'+counter++;
   const sec=$el('div',{className:'section',id:id});
+  const colorIdx = (pointList.length) % COLOR_LIST.length;
+  
   sec.innerHTML=`
   <b>点 ${id}</b>
-  <div class="row"><label>名称</label><input type="text" class="nameIn" value="${id}" maxlength="4"></div>
+  <div class="row">
+    <label>名称</label>
+    <input type="text" class="nameIn" value="${id}" maxlength="4">
+  </div>
   <div class="row">
     <label>类型</label>
-    <select class="typeSel"><option value="active">主动点</option><option value="passive">被动点</option></select>
+    <select class="typeSel">
+      <option value="active">主动点</option>
+      <option value="passive">被动点</option>
+    </select>
+  </div>
+  <div class="row color-row">
+    <label>颜色</label>
+    <select class="colorSel"></select>
   </div>
   <div class="passiveArea" style="display:none">
     <div class="row"><label>位置来源</label><select class="locSel">${opts(LOC_TYPE)}</select></div>
@@ -109,13 +123,35 @@ function addSection(){
   <div class="activeArea">
     <div class="row"><label>初始位置</label><input type="number" class="startIn" value="0" step="1"></div>
     <div class="row"><label>速度</label><input type="number" class="speedIn" value="1" min="0" step="0.1">
-      <select class="dirSel"><option value="-1">向左</option><option value="1">向右</option><option value="0">固定</option></select>
-    </div>
+      <select class="dirSel"><option value="-1">向左</option><option value="1">向右</option><option value="0">固定</option></select></div>
   </div>`;
+  
   document.getElementById('dynamicSecs').appendChild(sec);
+  
+  // 生成颜色预览 - 现在只有一个颜色选择器
+  const colorSel = sec.querySelector('.colorSel');
+  makeColorSelectForElement(colorSel, colorIdx);
+  
   bindSecEvents(sec,id);
   pointList.push(id);
 }
+
+function makeColorSelectForElement(selElement, defaultIdx=0) {
+  selElement.innerHTML = '';
+  COLOR_LIST.forEach((c, i) => {
+    const opt = document.createElement('option');
+    opt.value = c.hex;
+    opt.textContent = c.name;
+    const rgb = parseInt(c.hex.slice(1), 16);
+    const r = (rgb >> 16) & 0xff, g = (rgb >> 8) & 0xff, b = rgb & 0xff;
+    const br = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+    opt.className = br > 0.5 ? 'optDark' : 'optLight';
+    opt.style.cssText = `background:${c.hex};`;
+    if (i === defaultIdx) opt.selected = true;
+    selElement.appendChild(opt);
+  });
+}
+
 function opts(obj){
   return Object.keys(obj).map(k=>`<option value="${k}">${obj[k].text}</option>`).join('');
 }
@@ -123,11 +159,14 @@ function opts(obj){
 function bindSecEvents(sec,id){
   const typeSel=sec.querySelector('.typeSel');
   const pas=sec.querySelector('.passiveArea'),act=sec.querySelector('.activeArea');
+  const colorRow = sec.querySelector('.color-row');
+  
   typeSel.onchange=()=>{
     const isP=typeSel.value==='passive';
     pas.style.display=isP?'block':'none';
     act.style.display=isP?'none':'block';
   };
+  
   const locSel=sec.querySelector('.locSel'),velSel=sec.querySelector('.velSel');
   locSel.onchange=()=>buildSub(locSel,sec.querySelector('.locArea'),LOC_TYPE);
   velSel.onchange=()=>buildSub(velSel,sec.querySelector('.velArea'),VEL_TYPE);
@@ -144,14 +183,15 @@ function buildSub(sel,area,conf){
     area.appendChild(r);
   });
 }
+
 function buildRef(type){
   const r=$el('div',{className:'row'});
   const lab=$el('label',{textContent:type==='refAB'?'引用两点':'引用节点'});
   const s=$el('select',{});
-  s.innerHTML= type==='refAB'? '<option value="A,B">A,B</option>'
-                              : pointList.map(n=>`<option value="${n}">${n}</option>`).join('');
+  s.innerHTML= type==='refAB'? '<option value="A,B">A,B</option>' : pointList.map(n=>`<option value="${n}">${n}</option>`).join('');
   r.append(lab,s); return r;
 }
+
 function buildIn(name){
   const r=$el('div',{className:'row'});
   const lab=$el('label',{textContent:{start:'初始位置',offset:'偏移量',ratio:'比例',speed:'速度',dir:'方向'}[name]||name});
@@ -167,46 +207,79 @@ function buildIn(name){
   r.append(lab,i); return r;
 }
 
-/* 采集 & 校验 */
+/* 采集 & 拓扑 */
 function collect(){
-  const data={A:getAv('A'),B:getAv('B')};
+  const data={
+    A:{
+      name: document.getElementById('A_name').value.trim() || 'A',
+      start:Number(document.getElementById('A_start').value),
+      speed:Number(document.getElementById('A_speed').value),
+      dir:Number(document.getElementById('A_dir').value),
+      color:document.getElementById('A_color').value
+    },
+    B:{
+      name: document.getElementById('B_name').value.trim() || 'B',
+      start:Number(document.getElementById('B_start').value),
+      speed:Number(document.getElementById('B_speed').value),
+      dir:Number(document.getElementById('B_dir').value),
+      color:document.getElementById('B_color').value
+    }
+  };
+  
   const secs=document.querySelectorAll('#dynamicSecs .section');
   const edges=[];
+  
   secs.forEach(sec=>{
     const id=sec.id;
     const name=sec.querySelector('.nameIn').value.trim()||id;
+    const color=sec.querySelector('.colorSel').value;
     const isP=sec.querySelector('.typeSel').value==='passive';
+    
     if(isP){
       const locT=sec.querySelector('.locSel').value;
       const velT=sec.querySelector('.velSel').value;
       const locP=getSub(sec,'.locArea',locT,true);
       const velP=getSub(sec,'.velArea',velT,false);
-      data[id]={name,locationType:locT,locationParam:locP,velocityType:velT,velocityParam:velP};
+      data[id]={name,color,locationType:locT,locationParam:locP,velocityType:velT,velocityParam:velP};
       Object.values(locP).concat(Object.values(velP)).forEach(v=>{
-        if(pointList.includes(v)) edges.push([v,id]);
+        if(pointList.includes(v) || v===id) edges.push([v,id]);
       });
     }else{
-      data[id]={name,...getAv(id,true,sec)};
+      data[id]={
+        name,
+        color,
+        start:Number(sec.querySelector('.startIn').value),
+        speed:Number(sec.querySelector('.speedIn').value),
+        dir:Number(sec.querySelector('.dirSel').value)
+      };
     }
   });
-  // 拓扑
+  
+  // 检查循环依赖
   const allNodes=Object.keys(data);
   const deg={}; allNodes.forEach(n=>deg[n]=0);
   edges.forEach(([u,v])=>deg[v]++);
   let q=allNodes.filter(n=>deg[n]===0);
   let cnt=0;
-  while(q.length){ const u=q.pop(); cnt++; edges.filter(([_,v])=>v===u).forEach(([uu,vv])=>{ deg[vv]--; if(deg[vv]===0) q.push(vv); }); }
-  if(cnt!==allNodes.length){ alert('存在循环依赖，请检查被动点引用'); return null; }
+  while(q.length){ 
+    const u=q.pop(); 
+    cnt++; 
+    edges.forEach(([uu,vv])=>{
+      if(uu===u){
+        deg[vv]--; 
+        if(deg[vv]===0) q.push(vv);
+      }
+    });
+  }
+  
+  if(cnt!==allNodes.length){ 
+    alert('存在循环依赖，请检查被动点引用'); 
+    return null; 
+  }
+  
   return data;
 }
-function getAv(pref,fromSec=false,root=null){
-  root=root||document;
-  return {
-    start:Number((root.querySelector('#'+pref+'_start')||root.querySelector('.startIn')).value),
-    speed:Number((root.querySelector('#'+pref+'_speed')||root.querySelector('.speedIn')).value),
-    dir:Number((root.querySelector('#'+pref+'_dir')||root.querySelector('.dirSel')).value)
-  };
-}
+
 function getSub(sec,areaSel,type,isLoc){
   const area=sec.querySelector(areaSel);
   const conf=isLoc?LOC_TYPE[type]:VEL_TYPE[type];
@@ -215,12 +288,15 @@ function getSub(sec,areaSel,type,isLoc){
   needs.forEach(n=>{
     if(n==='refAB') p.refAB=area.querySelector('select').value;
     else if(n==='refP') p.refP=area.querySelector('select').value;
-    else p[n]=Number(area.querySelector('input[step="'+ (n==='ratio'?'0.01':'1') +'"]').value);
+    else{
+      const input = area.querySelector('input');
+      if(input) p[n]=Number(input.value);
+    }
   });
   return p;
 }
 
-/* 事件 & 初始 */
+/* 事件 */
 document.getElementById('addBtn').onclick=()=>addSection();
 document.getElementById('goBtn').onclick=()=>{
   const data=collect();
@@ -228,7 +304,11 @@ document.getElementById('goBtn').onclick=()=>{
   localStorage.setItem('motionParams',JSON.stringify(data));
   location.href='animate.html';
 };
-addSection();   // 默认先给一个
+
+/* 初始：A/B 颜色 + 默认第三点 */
+makeColorSelect('A_color',0);
+makeColorSelect('B_color',1);
+addSection();
 </script>
 </body>
 </html>
