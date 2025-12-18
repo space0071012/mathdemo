@@ -64,6 +64,15 @@ button{padding:8px 16px;font-size:15px}
 </div>
 
 <script>
+
+/* ---- 极简 DOM 助手 ---- */
+const $el=(tag,attr={},children=[])=>{
+  const e=document.createElement(tag);
+  Object.keys(attr).forEach(k=>e[k]=attr[k]);
+  children.forEach(c=>e.appendChild(c));
+  return e;
+};
+
 /* ========== 数据池 ========== */
 let pointList = ['A','B'];          // 已创建节点名（用于下拉引用）
 let counter   = 0;                  // 生成 ID 用
